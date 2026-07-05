@@ -119,6 +119,89 @@ in). Serve that folder with any static host.
 
 ---
 
+## Using the Swift ViewModel from React
+
+From the JavaScript side there are just three things: **initialize the runtime**, **get a Swift
+object**, **call it**. All of it is typed — BridgeJS emits a `.d.ts` describing the exported API.
+
+### 1. Initialize the Swift runtime (once, at launch)
+
+The compiled Swift is an ES module (`/swift/index.js`) whose `init()` instantiates the wasm and
+returns the exported API. In a Vite app, load it from a **`/public` module** — Vite won't let you
+`import()` a `/public` file from your `src` code, so a tiny boot script sidesteps that:
+
+```js
+// BSWDemoReact/public/boot-swift.js — referenced from index.html via
+// <script type="module" src="/boot-swift.js"></script>
+import { init } from "/swift/index.js"
+
+window.swiftViewModelReady = (async () => {
+    const { exports } = await init()               // instantiate the wasm module
+    exports.bootstrapSwiftRuntime()                // install Swift's concurrency runtime — ONCE
+    return await exports.createViewModelBridge()   // build a Swift object (step 2)
+})()
+```
+
+`bootstrapSwiftRuntime()` is the one-time, per-app-launch step (it installs the JS event-loop
+executor Swift concurrency needs). Call it once, before anything async.
+
+### 2. Make a Swift object available
+
+`exports.createViewModelBridge()` is an async factory: it constructs the Swift `ViewModel` (which
+does a network fetch on init) and hands back a JS object.
+
+```ts
+const vm = await exports.createViewModelBridge()   // vm: ViewModelBridge
+```
+
+`vm` is a live handle to the Swift instance. Our boot script stashes the `Promise<ViewModelBridge>`
+on `window.swiftViewModelReady` so React can `await` it.
+
+### 3. Read state and call methods
+
+The object is fully typed (straight from the generated `.d.ts`):
+
+```ts
+interface ViewModelBridge {
+    readonly ipAddress: string     // Swift String  → string
+    readonly counter: number       // Swift Int     → number
+    readonly randomNumber: number
+    bump(): void                   // calls Swift ViewModel.bump()
+    release(): void                // free the Swift object when you're done with it
+}
+```
+
+- **Read** properties directly — `vm.counter`, `vm.ipAddress`. They're **pull-only** (read on
+  demand), so for live values you poll.
+- **Call** methods directly — `vm.bump()`.
+- **Release** with `vm.release()` when the object is no longer needed (it holds a Swift heap
+  allocation; there's no GC across the wasm boundary).
+
+Putting it together in React:
+
+```tsx
+useEffect(() => {
+    let timer: number
+    window.swiftViewModelReady!.then((vm) => {
+        const read = () => setState({ ip: vm.ipAddress, counter: vm.counter, random: vm.randomNumber })
+        read()
+        timer = window.setInterval(read, 500)   // poll — BridgeJS getters don't push
+    })
+    return () => clearInterval(timer)
+}, [])
+
+// in the view:  <button onClick={() => vm.bump()}>Bump</button>
+```
+
+That's the whole surface: `init()` + `bootstrapSwiftRuntime()` once, `createViewModelBridge()` to get
+an object, then plain typed property reads and method calls. Working version:
+[`boot-swift.js`](BSWDemoReact/public/boot-swift.js) and [`App.tsx`](BSWDemoReact/src/App.tsx).
+
+> **Adding more to the API?** Everything above is generated from the `// SKIP @bridge` marker — see
+> [How the bridge works](#how-the-bridge-works-marker-driven) for the Swift side.
+
+---
+
 ## How the bridge works (marker-driven)
 
 The web bridge is **generated**, not hand-written — the DX mirrors Skip's Android bridging:
@@ -136,9 +219,9 @@ The web bridge is **generated**, not hand-written — the DX mirrors Skip's Andr
    function bootstrapSwiftRuntime(): void
    function createViewModelBridge(): Promise<ViewModelBridge>
    ```
-4. **Consume it.** [`boot-swift.js`](BSWDemoReact/public/boot-swift.js) loads the module, calls
-   `bootstrapSwiftRuntime()` once at launch, then `createViewModelBridge()`; React
-   ([`App.tsx`](BSWDemoReact/src/App.tsx)) reads the typed getters and calls `bump()`.
+4. **Consume it from JS.** The React app calls `init()` + `bootstrapSwiftRuntime()`, then
+   `createViewModelBridge()`, then reads the typed getters and calls `bump()` — see
+   [Using the Swift ViewModel from React](#using-the-swift-viewmodel-from-react).
 
 Design notes:
 - The `@MainActor` view model stays fully main-actor; the generated wrapper is a nonisolated,
