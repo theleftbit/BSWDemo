@@ -4,6 +4,7 @@ import Observation
 /// The reusable, UI-framework-agnostic view model shared by the SwiftUI app (`DemoUI`) and the
 /// React website (via the `DemoBridge` WASM target). It exercises a cross-section of BSWFoundation:
 /// a network GET via `APIClient`, a persisted value via a property wrapper, and observable state.
+// SKIP @bridge
 @Observable
 @MainActor
 public final class ViewModel {

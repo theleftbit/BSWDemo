@@ -43,6 +43,14 @@ let package = Package(
                 .product(name: "BSWFoundation", package: "BSWFoundation"),
                 .product(name: "JavaScriptKit", package: "JavaScriptKit", condition: .when(platforms: [.wasi])),
                 .product(name: "JavaScriptEventLoop", package: "JavaScriptKit", condition: .when(platforms: [.wasi])),
+            ],
+            swiftSettings: [
+                // BridgeJS-generated glue relies on @_extern(wasm).
+                .enableExperimentalFeature("Extern")
+            ],
+            plugins: [
+                // Generates Swift<->JS bindings + a TypeScript .d.ts from the @JS-annotated surface.
+                .plugin(name: "BridgeJS", package: "JavaScriptKit")
             ]
         ),
     ],

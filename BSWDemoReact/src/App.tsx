@@ -1,52 +1,76 @@
 import { useEffect, useRef, useState } from "react"
 
-/// Mirrors the state the Swift `DemoCore.ViewModel` pushes over the JS bridge.
-type DemoState = { ipAddress: string; counter: number; randomNumber: number }
-
-interface SwiftDemoController {
+/// The typed API BridgeJS generated for the Swift `ViewModelBridge` (see bridge-js.d.ts).
+interface ViewModelBridge {
+    readonly ipAddress: string
+    readonly counter: number
+    readonly randomNumber: number
     bump(): void
 }
 
+type Snapshot = { ipAddress: string; counter: number; randomNumber: number }
+
+// Set by /public/boot-swift.js once the wasm module is initialized.
+declare global {
+    interface Window { swiftViewModelReady?: Promise<ViewModelBridge> }
+}
+
+// The boot module and React mount race; poll briefly for the promise, then await it.
+function whenSwiftReady(): Promise<ViewModelBridge> {
+    if (window.swiftViewModelReady) return window.swiftViewModelReady
+    return new Promise((resolve) => {
+        const id = setInterval(() => {
+            if (window.swiftViewModelReady) {
+                clearInterval(id)
+                resolve(window.swiftViewModelReady)
+            }
+        }, 20)
+    })
+}
+
 export function App() {
-    const [state, setState] = useState<DemoState | null>(null)
+    const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const swift = useRef<SwiftDemoController | null>(null)
-    const started = useRef(false)
+    const vm = useRef<ViewModelBridge | null>(null)
+
+    const read = (bridge: ViewModelBridge) =>
+        setSnapshot({ ipAddress: bridge.ipAddress, counter: bridge.counter, randomNumber: bridge.randomNumber })
 
     useEffect(() => {
-        if (started.current) return // guard against a second dev-mode invocation
-        started.current = true
-
-        const w = window as unknown as Record<string, unknown>
-        // The Swift bridge (DemoBridge) calls these; register them before booting the module.
-        w.__swiftDemoUpdate = (s: DemoState) => setState(s)
-        w.__onSwiftDemoReady = (controller: SwiftDemoController) => { swift.current = controller }
-        w.__onSwiftDemoError = (message: string) => setError(message)
-
-        // The Swift ViewModel (compiled to WebAssembly) is booted by /public/boot-swift.js, loaded
-        // as a <script type="module"> in index.html. It calls the callbacks registered above.
+        let timer: number | undefined
+        whenSwiftReady()
+            .then((bridge) => {
+                vm.current = bridge
+                read(bridge)
+                timer = window.setInterval(() => read(bridge), 500) // BridgeJS getters are pull-only → poll
+            })
+            .catch((e) => setError(String(e)))
+        return () => { if (timer !== undefined) clearInterval(timer) }
     }, [])
 
     if (error) {
         return <p style={{ color: "crimson", fontFamily: "system-ui" }}>Failed to load: {error}</p>
     }
-    if (!state) {
+    if (!snapshot) {
         return <p style={{ fontFamily: "system-ui", margin: "2rem" }}>Loading Swift / WebAssembly…</p>
     }
 
     return (
         <main style={{ fontFamily: "system-ui, sans-serif", margin: "2rem", maxWidth: 480 }}>
             <h1>BSWDemo — React + Swift/WASM</h1>
-            <p><em>React renders the UI; the Swift <code>ViewModel</code> (compiled to WebAssembly) does the work.</em></p>
+            <p><em>React renders the UI; the Swift <code>ViewModel</code> (compiled to WebAssembly via BridgeJS) does the work.</em></p>
             <dl>
                 <dt style={{ fontWeight: 600 }}>IP Address</dt>
-                <dd style={{ margin: "0 0 1rem" }}>{state.ipAddress}</dd>
+                <dd style={{ margin: "0 0 1rem" }}>{snapshot.ipAddress}</dd>
                 <dt style={{ fontWeight: 600 }}>Counter</dt>
-                <dd style={{ margin: "0 0 1rem" }}>{state.counter}</dd>
+                <dd style={{ margin: "0 0 1rem" }}>{snapshot.counter}</dd>
                 <dt style={{ fontWeight: 600 }}>Random number</dt>
-                <dd style={{ margin: "0 0 1rem" }}>{state.randomNumber}</dd>
+                <dd style={{ margin: "0 0 1rem" }}>{snapshot.randomNumber}</dd>
             </dl>
-            <button onClick={() => swift.current?.bump()} style={{ padding: "0.5rem 1rem", fontSize: "1rem" }}>
+            <button
+                onClick={() => { vm.current?.bump(); if (vm.current) read(vm.current) }}
+                style={{ padding: "0.5rem 1rem", fontSize: "1rem" }}
+            >
                 Bump Counter
             </button>
         </main>
