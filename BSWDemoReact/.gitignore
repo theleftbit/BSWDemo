@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# Generated Swift/WASM bundle (built from ../BSWDemoKit)
+public/swift/
+*.local
+.DS_Store

@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Claude Code
+.claude/
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Node / Vite (also handled by BSWDemoReact/.gitignore)
+node_modules/
+dist/

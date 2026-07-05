@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BSWDemo — React + Swift/WASM</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <!-- Boots the Swift/WASM bridge as a static /public module (bypasses Vite's transform). -->
+    <script type="module" src="/boot-swift.js"></script>
+  </body>
+</html>
