@@ -92,6 +92,18 @@ for stmt in tree.statements {
     for m in methods {
         w += "    @JS func \(m)() { MainActor.assumeIsolated { model?.\(m)() } }\n"
     }
+    // Push: stream each observed property (via BSWFoundation's Observable.stream) and invoke the JS
+    // callback on change — so consumers get real reactivity instead of polling.
+    w += "\n    /// Push: invokes `onChange` whenever an observed property changes, so JS re-reads.\n"
+    w += "    @JS func subscribe(_ onChange: @escaping () -> Void) {\n"
+    w += "        let cb = __BridgeCallback(run: onChange)\n"
+    w += "        MainActor.assumeIsolated {\n"
+    w += "            guard let model else { return }\n"
+    for p in props {
+        w += "            Task { @MainActor in for await _ in model.stream(for: \\.\(p.name)) { cb.run() } }\n"
+    }
+    w += "        }\n"
+    w += "    }\n"
     w += "}\n"
     wrappers.append(w)
     FileHandle.standardError.write(Data("  \(name) -> \(name)Bridge: \(props.count) props, \(methods.count) methods, asyncInit=\(hasAsyncInit)\n".utf8))
@@ -105,6 +117,9 @@ let bootstrap = wrappers.isEmpty ? "" : """
     JavaScriptEventLoop.installGlobalExecutor()
 }
 
+// Boxes a non-Sendable JS callback so it can cross into the observation Tasks (wasm is single-threaded).
+private struct __BridgeCallback: @unchecked Sendable { let run: () -> Void }
+
 
 """
 let output = """
@@ -112,6 +127,7 @@ let output = """
 #if os(WASI)
 import JavaScriptKit
 import JavaScriptEventLoop
+import BSWFoundation
 import \(moduleToImport)
 
 \(bootstrap)\(wrappers.joined(separator: "\n"))

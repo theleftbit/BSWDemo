@@ -152,6 +152,7 @@ interface ViewModelBridge {
     readonly counter: number        // public var counter: Int
     readonly randomNumber: number   // public var randomNumber: Int
     bump(): void                    // public func bump()
+    subscribe(onChange: () => void): void  // push: fires on every @Observable change
     release(): void                 // free the Swift object (no GC across wasm)
 }
 ```
@@ -160,7 +161,8 @@ How the surface maps:
 
 | Swift | JavaScript / TypeScript |
 |---|---|
-| `public var x: String` / `Int` | `readonly x: string` / `number` — pull-only, so poll for live values |
+| `public var x: String` / `Int` | `readonly x: string` / `number` — read on demand |
+| an `@Observable` change | `subscribe(onChange)` — pushed to JS, so it's reactive (no polling) |
 | `public func bump()` | `bump(): void` |
 | `public init() async throws` | `createViewModelBridge(): Promise<ViewModelBridge>` — the async init stays one code path |
 | the class instance | a `SwiftHeapObject` handle; call `release()` when done |
@@ -215,12 +217,15 @@ interface ViewModelBridge {
     readonly counter: number       // Swift Int     → number
     readonly randomNumber: number
     bump(): void                   // calls Swift ViewModel.bump()
+    subscribe(onChange: () => void): void  // push: called on every @Observable change
     release(): void                // free the Swift object when you're done with it
 }
 ```
 
-- **Read** properties directly — `vm.counter`, `vm.ipAddress`. They're **pull-only** (read on
-  demand), so for live values you poll.
+- **Read** properties directly — `vm.counter`, `vm.ipAddress` (read on demand).
+- **React to changes** with `vm.subscribe(onChange)` — the Swift side calls `onChange` on every
+  `@Observable` change (via `Observable.stream(for:)`), so you re-read and re-render. Real push, no
+  polling; pairs naturally with React's `useSyncExternalStore`.
 - **Call** methods directly — `vm.bump()`.
 - **Release** with `vm.release()` when the object is no longer needed (it holds a Swift heap
   allocation; there's no GC across the wasm boundary).
@@ -229,23 +234,22 @@ Putting it together in React:
 
 ```tsx
 useEffect(() => {
-    let timer: number
     window.swiftReady!
         .then((swift) => swift.createViewModelBridge())   // create our instance
         .then((vm) => {
             const read = () => setState({ ip: vm.ipAddress, counter: vm.counter, random: vm.randomNumber })
-            read()
-            timer = window.setInterval(read, 500)         // poll — BridgeJS getters don't push
+            read()               // initial snapshot
+            vm.subscribe(read)   // push — Swift calls read() on every @Observable change
         })
-    return () => clearInterval(timer)
 }, [])
 
 // in the view:  <button onClick={() => vm.bump()}>Bump</button>
 ```
 
 That's the whole surface: bootstrap once (`init()` + `bootstrapSwiftRuntime()` → `window.swiftReady`),
-then `createViewModelBridge()` per object, then plain typed property reads and method calls. Working
-version: [`boot-swift.js`](BSWDemoReact/public/boot-swift.js) and [`App.tsx`](BSWDemoReact/src/App.tsx).
+`createViewModelBridge()` per object, `subscribe()` for reactive updates, and typed reads / method
+calls. Working version: [`boot-swift.js`](BSWDemoReact/public/boot-swift.js) and
+[`App.tsx`](BSWDemoReact/src/App.tsx).
 
 > **Adding more to the API?** Everything above is generated from the `// SKIP @bridge` marker — see
 > [How the bridge works](#how-the-bridge-works-marker-driven) for the Swift side.
@@ -290,13 +294,13 @@ Key files:
 ## Notes & caveats
 
 - **`BridgeJSGen` is a proof of concept.** It handles marked classes with public typed properties
-  (read-only getters), no-arg `Void` methods, and an async initializer. Methods with arguments,
-  richer types, and structs/enums would need more work. A production setup would wire it as a SwiftPM
-  **build-tool plugin** (like `skipstone`) so it regenerates on every build — then nothing generated
-  ever lands in git.
-- **Reactivity is pull-based:** BridgeJS getters are read-on-demand, so the React app polls them. A
-  push path (a `subscribe(onChange:)` closure) is possible — BridgeJS supports closures — but isn't
-  wired here.
+  (read-only getters), no-arg `Void` methods, an async initializer, and a `subscribe(onChange:)`
+  driven by `Observable.stream(for:)`. Methods with arguments, richer types, and structs/enums would
+  need more work. A production setup would wire it as a SwiftPM **build-tool plugin** (like
+  `skipstone`) so it regenerates on every build — then nothing generated ever lands in git.
+- **Reactivity is push-based:** `subscribe(onChange:)` — a BridgeJS-exported closure — fires on every
+  `@Observable` change via `Observable.stream(for:)`, so React re-renders without polling. The
+  property reads themselves are still on-demand getters.
 - **`BridgeJS` is experimental** (JavaScriptKit) — APIs may change.
 - **The `BSWFoundation` dependency points at the `feature/wasm-port` branch** while WASM support is
   in review. Swap it to a released version once merged (`BSWDemoKit/Package.swift`).

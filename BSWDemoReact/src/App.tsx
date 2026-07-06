@@ -6,6 +6,7 @@ interface ViewModelBridge {
     readonly counter: number
     readonly randomNumber: number
     bump(): void
+    subscribe(onChange: () => void): void   // push: Swift calls back on every @Observable change
     release(): void
 }
 
@@ -40,20 +41,17 @@ export function App() {
     const [error, setError] = useState<string | null>(null)
     const vm = useRef<ViewModelBridge | null>(null)
 
-    const read = (bridge: ViewModelBridge) =>
-        setSnapshot({ ipAddress: bridge.ipAddress, counter: bridge.counter, randomNumber: bridge.randomNumber })
-
     useEffect(() => {
-        let timer: number | undefined
         whenSwiftReady()
             .then((swift) => swift.createViewModelBridge()) // runtime already up → just create an instance
             .then((bridge) => {
                 vm.current = bridge
-                read(bridge)
-                timer = window.setInterval(() => read(bridge), 500) // BridgeJS getters are pull-only → poll
+                const read = () =>
+                    setSnapshot({ ipAddress: bridge.ipAddress, counter: bridge.counter, randomNumber: bridge.randomNumber })
+                read()                 // initial snapshot
+                bridge.subscribe(read) // push — Swift calls read() on every @Observable change (no polling)
             })
             .catch((e) => setError(String(e)))
-        return () => { if (timer !== undefined) clearInterval(timer) }
     }, [])
 
     if (error) {
@@ -76,7 +74,7 @@ export function App() {
                 <dd style={{ margin: "0 0 1rem" }}>{snapshot.randomNumber}</dd>
             </dl>
             <button
-                onClick={() => { vm.current?.bump(); if (vm.current) read(vm.current) }}
+                onClick={() => vm.current?.bump()}
                 style={{ padding: "0.5rem 1rem", fontSize: "1rem" }}
             >
                 Bump Counter
