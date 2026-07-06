@@ -2,11 +2,12 @@
 // marker. Loaded as a /public module via a <script type="module"> tag so the browser imports it
 // natively (Vite would otherwise try to transform this and /swift/index.js as source assets).
 //
-// Exposes a Promise<ViewModelBridge> the React app awaits. `bootstrapSwiftRuntime()` is the
-// once-per-launch runtime install; `createViewModelBridge()` is the async factory.
+// Exposes `window.viewModelBridge`: a Promise that resolves to the ready ViewModelBridge for React
+// to await. `bootstrapSwiftRuntime()` installs the Swift concurrency runtime once at launch;
+// `createViewModelBridge()` is the async factory that builds the Swift ViewModel.
 import { init } from "/swift/index.js"
 
-window.swiftViewModelReady = (async () => {
+window.viewModelBridge = (async () => {
     const { exports } = await init()
     exports.bootstrapSwiftRuntime()
     return await exports.createViewModelBridge()

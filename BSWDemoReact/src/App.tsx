@@ -12,17 +12,17 @@ type Snapshot = { ipAddress: string; counter: number; randomNumber: number }
 
 // Set by /public/boot-swift.js once the wasm module is initialized.
 declare global {
-    interface Window { swiftViewModelReady?: Promise<ViewModelBridge> }
+    interface Window { viewModelBridge?: Promise<ViewModelBridge> }
 }
 
 // The boot module and React mount race; poll briefly for the promise, then await it.
 function whenSwiftReady(): Promise<ViewModelBridge> {
-    if (window.swiftViewModelReady) return window.swiftViewModelReady
+    if (window.viewModelBridge) return window.viewModelBridge
     return new Promise((resolve) => {
         const id = setInterval(() => {
-            if (window.swiftViewModelReady) {
+            if (window.viewModelBridge) {
                 clearInterval(id)
-                resolve(window.swiftViewModelReady)
+                resolve(window.viewModelBridge)
             }
         }, 20)
     })

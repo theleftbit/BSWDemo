@@ -124,6 +124,50 @@ in). Serve that folder with any static host.
 From the JavaScript side there are just three things: **initialize the runtime**, **get a Swift
 object**, **call it**. All of it is typed — BridgeJS emits a `.d.ts` describing the exported API.
 
+### The `ViewModel`, bridged
+
+The Swift model ([`DemoCore/ViewModel.swift`](BSWDemoKit/Sources/DemoCore/ViewModel.swift)), reduced
+to its public surface:
+
+```swift
+// SKIP @bridge
+@Observable @MainActor
+public final class ViewModel {
+    public var ipAddress: String         // fetched once at init
+    public var randomNumber: Int         // changes on a timer
+    public var counter: Int { get set }  // persisted (localStorage on wasm)
+    public init() async throws           // does the network fetch
+    public func bump()
+}
+```
+
+…is what JavaScript sees (generated `bridge-js.d.ts`):
+
+```ts
+declare function bootstrapSwiftRuntime(): void
+declare function createViewModelBridge(): Promise<ViewModelBridge>
+
+interface ViewModelBridge {
+    readonly ipAddress: string      // public var ipAddress: String
+    readonly counter: number        // public var counter: Int
+    readonly randomNumber: number   // public var randomNumber: Int
+    bump(): void                    // public func bump()
+    release(): void                 // free the Swift object (no GC across wasm)
+}
+```
+
+How the surface maps:
+
+| Swift | JavaScript / TypeScript |
+|---|---|
+| `public var x: String` / `Int` | `readonly x: string` / `number` — pull-only, so poll for live values |
+| `public func bump()` | `bump(): void` |
+| `public init() async throws` | `createViewModelBridge(): Promise<ViewModelBridge>` — the async init stays one code path |
+| the class instance | a `SwiftHeapObject` handle; call `release()` when done |
+
+> Only the **public** surface crosses; `private`/`@ObservationIgnored` members (the property-wrapper
+> storage, the timer `Task`) stay inside Swift. `@MainActor` is handled by the generated wrapper.
+
 ### 1. Initialize the Swift runtime (once, at launch)
 
 The compiled Swift is an ES module (`/swift/index.js`) whose `init()` instantiates the wasm and
@@ -135,7 +179,7 @@ returns the exported API. In a Vite app, load it from a **`/public` module** —
 // <script type="module" src="/boot-swift.js"></script>
 import { init } from "/swift/index.js"
 
-window.swiftViewModelReady = (async () => {
+window.viewModelBridge = (async () => {
     const { exports } = await init()               // instantiate the wasm module
     exports.bootstrapSwiftRuntime()                // install Swift's concurrency runtime — ONCE
     return await exports.createViewModelBridge()   // build a Swift object (step 2)
@@ -155,7 +199,7 @@ const vm = await exports.createViewModelBridge()   // vm: ViewModelBridge
 ```
 
 `vm` is a live handle to the Swift instance. Our boot script stashes the `Promise<ViewModelBridge>`
-on `window.swiftViewModelReady` so React can `await` it.
+on `window.viewModelBridge` so React can `await` it.
 
 ### 3. Read state and call methods
 
@@ -182,7 +226,7 @@ Putting it together in React:
 ```tsx
 useEffect(() => {
     let timer: number
-    window.swiftViewModelReady!.then((vm) => {
+    window.viewModelBridge!.then((vm) => {
         const read = () => setState({ ip: vm.ipAddress, counter: vm.counter, random: vm.randomNumber })
         read()
         timer = window.setInterval(read, 500)   // poll — BridgeJS getters don't push
