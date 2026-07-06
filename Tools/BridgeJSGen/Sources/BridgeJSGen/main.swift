@@ -85,6 +85,7 @@ for stmt in tree.statements {
     w += "}\n\n"
     w += "@JS class \(name)Bridge: @unchecked Sendable {\n"
     w += "    fileprivate var model: \(name)?\n"
+    w += "    private var __subscriptions: [Task<Void, Never>] = []\n"
     w += "    init() {}\n"
     for p in props {
         w += "    @JS var \(p.name): \(p.type) { MainActor.assumeIsolated { model?.\(p.name) ?? \(defaultValue(for: p.type)) } }\n"
@@ -100,10 +101,11 @@ for stmt in tree.statements {
     w += "        MainActor.assumeIsolated {\n"
     w += "            guard let model else { return }\n"
     for p in props {
-        w += "            Task { @MainActor in for await _ in model.stream(for: \\.\(p.name)) { cb.run() } }\n"
+        w += "            __subscriptions.append(Task { @MainActor in for await _ in model.stream(for: \\.\(p.name)) { cb.run() } })\n"
     }
     w += "        }\n"
-    w += "    }\n"
+    w += "    }\n\n"
+    w += "    deinit { __subscriptions.forEach { $0.cancel() } }\n"
     w += "}\n"
     wrappers.append(w)
     FileHandle.standardError.write(Data("  \(name) -> \(name)Bridge: \(props.count) props, \(methods.count) methods, asyncInit=\(hasAsyncInit)\n".utf8))

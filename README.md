@@ -230,25 +230,29 @@ interface ViewModelBridge {
 - **Release** with `vm.release()` when the object is no longer needed (it holds a Swift heap
   allocation; there's no GC across the wasm boundary).
 
-Putting it together in React:
+In practice you don't wire `subscribe`/`release` by hand.
+[`src/swift-react.tsx`](BSWDemoReact/src/swift-react.tsx) provides **`useViewModel`** and
+**`<AsyncView>`** — the React analog of Polymarket's `SwiftViewModelUtils` (lifecycle) and MediQuo's
+`AsyncView` (async init). The hook creates the model once the runtime is up, re-renders on every
+change, and `release()`s it on unmount, so a component carries **no** lifecycle code:
 
 ```tsx
-useEffect(() => {
-    window.swiftReady!
-        .then((swift) => swift.createViewModelBridge())   // create our instance
-        .then((vm) => {
-            const read = () => setState({ ip: vm.ipAddress, counter: vm.counter, random: vm.randomNumber })
-            read()               // initial snapshot
-            vm.subscribe(read)   // push — Swift calls read() on every @Observable change
-        })
-}, [])
+const vmState = useViewModel<ViewModelBridge>((swift) => swift.createViewModelBridge())
 
-// in the view:  <button onClick={() => vm.bump()}>Bump</button>
+return (
+    <AsyncView state={vmState}>
+        {(vm) => (
+            <>
+                <p>IP {vm.ipAddress} · counter {vm.counter} · random {vm.randomNumber}</p>
+                <button onClick={() => vm.bump()}>Bump</button>
+            </>
+        )}
+    </AsyncView>
+)
 ```
 
-That's the whole surface: bootstrap once (`init()` + `bootstrapSwiftRuntime()` → `window.swiftReady`),
-`createViewModelBridge()` per object, `subscribe()` for reactive updates, and typed reads / method
-calls. Working version: [`boot-swift.js`](BSWDemoReact/public/boot-swift.js) and
+No `subscribe`, no `release`, no loading boilerplate in the component — those live in the primitive.
+Working version: [`swift-react.tsx`](BSWDemoReact/src/swift-react.tsx) and
 [`App.tsx`](BSWDemoReact/src/App.tsx).
 
 > **Adding more to the API?** Everything above is generated from the `// SKIP @bridge` marker — see
@@ -289,6 +293,7 @@ Key files:
 - Shared model (marked) — [`DemoCore/ViewModel.swift`](BSWDemoKit/Sources/DemoCore/ViewModel.swift)
 - SwiftUI view — [`DemoUI/ContentView.swift`](BSWDemoKit/Sources/DemoUI/ContentView.swift)
 - Generator — [`Tools/BridgeJSGen`](Tools/BridgeJSGen/Sources/BridgeJSGen/main.swift)
+- React primitives — [`BSWDemoReact/src/swift-react.tsx`](BSWDemoReact/src/swift-react.tsx) (`useViewModel` + `AsyncView`)
 - React view — [`BSWDemoReact/src/App.tsx`](BSWDemoReact/src/App.tsx)
 
 ## Notes & caveats
