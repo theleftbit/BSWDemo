@@ -168,40 +168,42 @@ How the surface maps:
 > Only the **public** surface crosses; `private`/`@ObservationIgnored` members (the property-wrapper
 > storage, the timer `Task`) stay inside Swift. `@MainActor` is handled by the generated wrapper.
 
-### 1. Initialize the Swift runtime (once, at launch)
+### 1. Bootstrap the runtime — once per app launch
 
 The compiled Swift is an ES module (`/swift/index.js`) whose `init()` instantiates the wasm and
 returns the exported API. In a Vite app, load it from a **`/public` module** — Vite won't let you
-`import()` a `/public` file from your `src` code, so a tiny boot script sidesteps that:
+`import()` a `/public` file from your `src` code, so a tiny boot script sidesteps that. Bootstrap
+happens here, **once**, and hands back the ready exports:
 
 ```js
 // BSWDemoReact/public/boot-swift.js — referenced from index.html via
 // <script type="module" src="/boot-swift.js"></script>
 import { init } from "/swift/index.js"
 
-window.viewModelBridge = (async () => {
-    const { exports } = await init()               // instantiate the wasm module
-    exports.bootstrapSwiftRuntime()                // install Swift's concurrency runtime — ONCE
-    return await exports.createViewModelBridge()   // build a Swift object (step 2)
+window.swiftReady = (async () => {
+    const { exports } = await init()   // instantiate the wasm module
+    exports.bootstrapSwiftRuntime()    // install Swift's concurrency runtime — ONCE
+    return exports                     // hand back the API; callers create objects on demand
 })()
 ```
 
-`bootstrapSwiftRuntime()` is the one-time, per-app-launch step (it installs the JS event-loop
-executor Swift concurrency needs). Call it once, before anything async.
+`bootstrapSwiftRuntime()` installs the JS event-loop executor Swift concurrency needs — the
+per-launch step. `window.swiftReady` resolves to the bridge's **exports**, independent of any
+particular object, so it's created once and reused for everything you make.
 
-### 2. Get the object (create it once)
+### 2. Create objects — as many as you need
 
-`createViewModelBridge()` is the factory — an async function returning `Promise<ViewModelBridge>`
-that constructs the Swift `ViewModel` (network fetch and all). **Call it once.** The boot script in
-step 1 already does, and stashes the promise on `window.viewModelBridge`; everywhere else you just
-await that same promise:
+With the runtime up, each Swift object comes from its factory. `createViewModelBridge()` is an async
+function returning `Promise<ViewModelBridge>` that constructs the Swift `ViewModel` (network fetch and
+all). Call it **per instance** — the bootstrap above is *not* repeated:
 
 ```ts
-const vm = await window.viewModelBridge   // the one instance the boot script created
+const swift = await window.swiftReady           // the bootstrapped exports (step 1)
+const vm = await swift.createViewModelBridge()   // one ViewModel; call again for more
 ```
 
-`vm` is a live handle to that single Swift instance — every read and call below hits the same object.
-(If you needed several independent models, you'd call `createViewModelBridge()` again per instance.)
+`vm` is a live handle to that Swift instance — every read and call below hits it. A bigger app makes
+many objects (`createUserBridge()`, `createFeedBridge()`, …) off the same `swiftReady`.
 
 ### 3. Read state and call methods
 
@@ -228,20 +230,22 @@ Putting it together in React:
 ```tsx
 useEffect(() => {
     let timer: number
-    window.viewModelBridge!.then((vm) => {
-        const read = () => setState({ ip: vm.ipAddress, counter: vm.counter, random: vm.randomNumber })
-        read()
-        timer = window.setInterval(read, 500)   // poll — BridgeJS getters don't push
-    })
+    window.swiftReady!
+        .then((swift) => swift.createViewModelBridge())   // create our instance
+        .then((vm) => {
+            const read = () => setState({ ip: vm.ipAddress, counter: vm.counter, random: vm.randomNumber })
+            read()
+            timer = window.setInterval(read, 500)         // poll — BridgeJS getters don't push
+        })
     return () => clearInterval(timer)
 }, [])
 
 // in the view:  <button onClick={() => vm.bump()}>Bump</button>
 ```
 
-That's the whole surface: `init()` + `bootstrapSwiftRuntime()` once, `createViewModelBridge()` to get
-an object, then plain typed property reads and method calls. Working version:
-[`boot-swift.js`](BSWDemoReact/public/boot-swift.js) and [`App.tsx`](BSWDemoReact/src/App.tsx).
+That's the whole surface: bootstrap once (`init()` + `bootstrapSwiftRuntime()` → `window.swiftReady`),
+then `createViewModelBridge()` per object, then plain typed property reads and method calls. Working
+version: [`boot-swift.js`](BSWDemoReact/public/boot-swift.js) and [`App.tsx`](BSWDemoReact/src/App.tsx).
 
 > **Adding more to the API?** Everything above is generated from the `// SKIP @bridge` marker — see
 > [How the bridge works](#how-the-bridge-works-marker-driven) for the Swift side.
@@ -265,9 +269,9 @@ The web bridge is **generated**, not hand-written — the DX mirrors Skip's Andr
    function bootstrapSwiftRuntime(): void
    function createViewModelBridge(): Promise<ViewModelBridge>
    ```
-4. **Consume it from JS.** The boot script runs `init()` + `bootstrapSwiftRuntime()` +
-   `createViewModelBridge()` once; React then awaits that one instance and reads its typed getters /
-   calls `bump()` — see [Using the Swift ViewModel from React](#using-the-swift-viewmodel-from-react).
+4. **Consume it from JS.** The boot script runs `init()` + `bootstrapSwiftRuntime()` **once**; React
+   then creates a `ViewModelBridge` (and could create more) and reads its typed getters / calls
+   `bump()` — see [Using the Swift ViewModel from React](#using-the-swift-viewmodel-from-react).
 
 Design notes:
 - The `@MainActor` view model stays fully main-actor; the generated wrapper is a nonisolated,

@@ -6,23 +6,30 @@ interface ViewModelBridge {
     readonly counter: number
     readonly randomNumber: number
     bump(): void
+    release(): void
+}
+
+/// The subset of the generated bridge exports this app uses. `createViewModelBridge()` can be
+/// called as many times as you need instances.
+interface SwiftExports {
+    createViewModelBridge(): Promise<ViewModelBridge>
 }
 
 type Snapshot = { ipAddress: string; counter: number; randomNumber: number }
 
-// Set by /public/boot-swift.js once the wasm module is initialized.
+// Set once by /public/boot-swift.js after the Swift runtime is bootstrapped (once per app launch).
 declare global {
-    interface Window { viewModelBridge?: Promise<ViewModelBridge> }
+    interface Window { swiftReady?: Promise<SwiftExports> }
 }
 
 // The boot module and React mount race; poll briefly for the promise, then await it.
-function whenSwiftReady(): Promise<ViewModelBridge> {
-    if (window.viewModelBridge) return window.viewModelBridge
+function whenSwiftReady(): Promise<SwiftExports> {
+    if (window.swiftReady) return window.swiftReady
     return new Promise((resolve) => {
         const id = setInterval(() => {
-            if (window.viewModelBridge) {
+            if (window.swiftReady) {
                 clearInterval(id)
-                resolve(window.viewModelBridge)
+                resolve(window.swiftReady)
             }
         }, 20)
     })
@@ -39,6 +46,7 @@ export function App() {
     useEffect(() => {
         let timer: number | undefined
         whenSwiftReady()
+            .then((swift) => swift.createViewModelBridge()) // runtime already up → just create an instance
             .then((bridge) => {
                 vm.current = bridge
                 read(bridge)
