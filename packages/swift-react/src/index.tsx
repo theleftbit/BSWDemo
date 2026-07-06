@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react"
 
-// React primitives for consuming Swift ViewModels bridged to WASM — the analog of Polymarket's
-// `SwiftViewModelUtils` (lifecycle) and MediQuo's `AsyncView` (async init). Components that use
+// React primitives for consuming Swift ViewModels bridged to WASM — the React tier of
+// BSWInterfaceKit, playing the role `AsyncView` plays on iOS/Android. Components that use
 // `useViewModel` never touch bootstrap, `subscribe`, or `release`.
 
 /// A Swift object bridged to JS: it pushes change notifications and must be released (BridgeJS heap
@@ -16,12 +16,12 @@ export type Async<T> =
     | { readonly status: "error"; readonly error: unknown }
     | { readonly status: "ready"; readonly value: T }
 
-// The bootstrapped Swift exports, published once by /public/boot-swift.js.
+// The bootstrapped Swift exports, published once by the app's boot script (see BSWDemo).
 declare global {
     interface Window { swiftReady?: Promise<unknown> }
 }
 
-// boot-swift.js and React mount race; poll briefly for the promise, then await it.
+// The boot script and React mount race; poll briefly for the promise, then await it.
 function whenSwiftReady(): Promise<any> {
     if (window.swiftReady) return window.swiftReady
     return new Promise((resolve) => {
@@ -64,7 +64,7 @@ export function useViewModel<VM extends SwiftObject>(create: (swift: any) => Pro
     return state
 }
 
-/// Renders one of loading / error / ready. The React analog of MediQuo's `AsyncView`.
+/// Renders one of loading / error / ready. The React analog of BSWInterfaceKit's `AsyncView`.
 export function AsyncView<T>({ state, loading, error, children }: {
     state: Async<T>
     loading?: ReactNode

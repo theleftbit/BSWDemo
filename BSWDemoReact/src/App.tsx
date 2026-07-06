@@ -1,4 +1,4 @@
-import { AsyncView, useViewModel, type SwiftObject } from "./swift-react"
+import { AsyncView, useViewModel, type SwiftObject } from "@theleftbit/swift-react"
 
 /// The typed API BridgeJS generated for the Swift `ViewModelBridge` (see bridge-js.d.ts).
 /// `subscribe` / `release` come from `SwiftObject` and are handled by `useViewModel`.

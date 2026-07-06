@@ -30,6 +30,9 @@ DemoCore.ViewModel              shared logic: APIClient, storage, @Observable st
   [JavaScriptKit](https://github.com/swiftwasm/JavaScriptKit)'s **BridgeJS** plugin.
 - **`BSWDemoReact`** — a Vite + React + TypeScript app that constructs the generated
   `ViewModelBridge` and renders its state.
+- **`@theleftbit/swift-react`** (`packages/swift-react`) — reusable React primitives
+  (`useViewModel`, `<AsyncView>`) that own a bridged ViewModel's lifecycle. The **React tier of
+  BSWInterfaceKit** — shared infra the app depends on, not app code.
 - **`Tools/BridgeJSGen`** — a small SwiftSyntax generator: reads `// SKIP @bridge` markers and emits
   `@JS` wrappers. The WASM analog of Skip's `skipstone`. (Proof of concept — see caveats.)
 
@@ -40,6 +43,7 @@ DemoCore.ViewModel              shared logic: APIClient, storage, @Observable st
 | `BSWDemo.xcodeproj` / `BSWDemo/` | The native app shell (`@main`), wired to the local `BSWDemoKit` package |
 | `BSWDemoKit/` | The Swift package: `DemoCore`, `DemoUI`, `DemoBridge` targets |
 | `BSWDemoReact/` | The Vite + React app that renders the generated bridge |
+| `packages/swift-react/` | `@theleftbit/swift-react` — reusable React primitives (`useViewModel`, `AsyncView`) the app consumes |
 | `Tools/BridgeJSGen/` | The marker → `@JS` wrapper generator |
 
 ---
@@ -230,13 +234,16 @@ interface ViewModelBridge {
 - **Release** with `vm.release()` when the object is no longer needed (it holds a Swift heap
   allocation; there's no GC across the wasm boundary).
 
-In practice you don't wire `subscribe`/`release` by hand.
-[`src/swift-react.tsx`](BSWDemoReact/src/swift-react.tsx) provides **`useViewModel`** and
-**`<AsyncView>`** — the React analog of Polymarket's `SwiftViewModelUtils` (lifecycle) and MediQuo's
-`AsyncView` (async init). The hook creates the model once the runtime is up, re-renders on every
-change, and `release()`s it on unmount, so a component carries **no** lifecycle code:
+In practice you don't wire `subscribe`/`release` by hand. The
+[`@theleftbit/swift-react`](packages/swift-react) package provides **`useViewModel`** and
+**`<AsyncView>`** — the React tier of BSWInterfaceKit (the same role `AsyncView` plays on iOS/Android,
+and analogous to Polymarket's `SwiftViewModelUtils`). The hook creates the model once the runtime is
+up, re-renders on every change, and `release()`s it on unmount, so a component carries **no**
+lifecycle code:
 
 ```tsx
+import { useViewModel, AsyncView } from "@theleftbit/swift-react"
+
 const vmState = useViewModel<ViewModelBridge>((swift) => swift.createViewModelBridge())
 
 return (
@@ -251,8 +258,8 @@ return (
 )
 ```
 
-No `subscribe`, no `release`, no loading boilerplate in the component — those live in the primitive.
-Working version: [`swift-react.tsx`](BSWDemoReact/src/swift-react.tsx) and
+No `subscribe`, no `release`, no loading boilerplate in the component — those live in the package.
+Working version: [`packages/swift-react`](packages/swift-react/src/index.tsx) and
 [`App.tsx`](BSWDemoReact/src/App.tsx).
 
 > **Adding more to the API?** Everything above is generated from the `// SKIP @bridge` marker — see
@@ -293,7 +300,7 @@ Key files:
 - Shared model (marked) — [`DemoCore/ViewModel.swift`](BSWDemoKit/Sources/DemoCore/ViewModel.swift)
 - SwiftUI view — [`DemoUI/ContentView.swift`](BSWDemoKit/Sources/DemoUI/ContentView.swift)
 - Generator — [`Tools/BridgeJSGen`](Tools/BridgeJSGen/Sources/BridgeJSGen/main.swift)
-- React primitives — [`BSWDemoReact/src/swift-react.tsx`](BSWDemoReact/src/swift-react.tsx) (`useViewModel` + `AsyncView`)
+- React primitives — [`packages/swift-react`](packages/swift-react/src/index.tsx) — `useViewModel` + `AsyncView`, published as `@theleftbit/swift-react`
 - React view — [`BSWDemoReact/src/App.tsx`](BSWDemoReact/src/App.tsx)
 
 ## Notes & caveats
