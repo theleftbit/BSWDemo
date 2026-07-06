@@ -189,17 +189,19 @@ window.viewModelBridge = (async () => {
 `bootstrapSwiftRuntime()` is the one-time, per-app-launch step (it installs the JS event-loop
 executor Swift concurrency needs). Call it once, before anything async.
 
-### 2. Make a Swift object available
+### 2. Get the object (create it once)
 
-`exports.createViewModelBridge()` is an async factory: it constructs the Swift `ViewModel` (which
-does a network fetch on init) and hands back a JS object.
+`createViewModelBridge()` is the factory — an async function returning `Promise<ViewModelBridge>`
+that constructs the Swift `ViewModel` (network fetch and all). **Call it once.** The boot script in
+step 1 already does, and stashes the promise on `window.viewModelBridge`; everywhere else you just
+await that same promise:
 
 ```ts
-const vm = await exports.createViewModelBridge()   // vm: ViewModelBridge
+const vm = await window.viewModelBridge   // the one instance the boot script created
 ```
 
-`vm` is a live handle to the Swift instance. Our boot script stashes the `Promise<ViewModelBridge>`
-on `window.viewModelBridge` so React can `await` it.
+`vm` is a live handle to that single Swift instance — every read and call below hits the same object.
+(If you needed several independent models, you'd call `createViewModelBridge()` again per instance.)
 
 ### 3. Read state and call methods
 
@@ -263,9 +265,9 @@ The web bridge is **generated**, not hand-written — the DX mirrors Skip's Andr
    function bootstrapSwiftRuntime(): void
    function createViewModelBridge(): Promise<ViewModelBridge>
    ```
-4. **Consume it from JS.** The React app calls `init()` + `bootstrapSwiftRuntime()`, then
-   `createViewModelBridge()`, then reads the typed getters and calls `bump()` — see
-   [Using the Swift ViewModel from React](#using-the-swift-viewmodel-from-react).
+4. **Consume it from JS.** The boot script runs `init()` + `bootstrapSwiftRuntime()` +
+   `createViewModelBridge()` once; React then awaits that one instance and reads its typed getters /
+   calls `bump()` — see [Using the Swift ViewModel from React](#using-the-swift-viewmodel-from-react).
 
 Design notes:
 - The `@MainActor` view model stays fully main-actor; the generated wrapper is a nonisolated,
